@@ -196,6 +196,17 @@ async function checkAuthPassive(ctx) {
   return null;
 }
 
+// 站点相对时间（"about 3 hours ago"）→ 近似绝对时间 ISO
+function relToIso(text) {
+  if (!text) return null;
+  const m = text.match(/(\d+|a|an|less than a|about a)\s+(second|minute|hour|day|month|year)s?\s*ago/i);
+  if (!m) return null;
+  const word = m[1].toLowerCase();
+  const n = /a$|an$/.test(word) ? 1 : parseInt(m[1], 10) || 1;
+  const mult = { second: 1000, minute: 60000, hour: 3600000, day: 86400000, month: 2592000000, year: 31536000000 }[m[2].toLowerCase()];
+  return new Date(Date.now() - n * mult).toISOString();
+}
+
 function extractAppId(input) {
   // 支持: idXXXX / decrypt.day app 链接 / apps.apple.com 链接
   const m =
@@ -369,6 +380,12 @@ async function cmdStatus(args) {
       const badge = el.locator('[class*="dd-badge"]').first();
       const link = el.locator(".app-name a").first();
       const itemText = await el.innerText().catch(() => "");
+      // 提交时间：站点原文（相对时间）+ 近似绝对时间
+      let requestedAtText = null;
+      try {
+        const ra = el.locator("p.request-at").first();
+        if ((await ra.count()) > 0) requestedAtText = (await ra.innerText()).replace(/^Request\s*/i, "").trim() || null;
+      } catch {}
       // 版本：version 段落文本去掉徽章和 Note 部分
       let version = null;
       try {
@@ -387,6 +404,8 @@ async function cmdStatus(args) {
         appName: (await link.count()) ? (await link.innerText()).trim() : null,
         appId: (await link.count()) ? extractAppId((await link.getAttribute("href")) || "") : null,
         version,
+        requestedAtText,
+        requestedAt: relToIso(requestedAtText),
         raw: itemText.replace(/\n+/g, " | ").slice(0, 200),
       });
     }
