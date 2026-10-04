@@ -574,6 +574,10 @@ async function cmdDownload(args) {
         message: `对话框当前是 ${dlg.dialogVersion} 的文件，期望 ${expected}（站点可能尚未更新到最新版本）。可用 --version ${dlg.dialogVersion} 显式下载旧版，或 --force 忽略校验`,
       });
     }
+    if (expected && !args.force && !dlg.dialogVersion) {
+      // 对话框标题解析失败——版本无法核对，显式警告而不是静默跳过
+      log(`警告: 期望版本 ${expected} 但未能读取对话框版本号，本次下载不做版本校验`);
+    }
     if (dlg.premierState === "need_login") return out({ ok: false, error: "NOT_LOGGED_IN" });
     if (dlg.premierState === "not_premier") return out({ ok: false, error: "NOT_PREMIER", message: "该文件是 Premier Link，当前账号无权限" });
     if (!dlg.premierState && !dlg.freeReady) return out({ ok: false, error: "NO_FILE", message: "该版本暂无任何可下载文件" });
