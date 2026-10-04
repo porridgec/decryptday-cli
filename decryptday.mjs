@@ -207,6 +207,14 @@ function relToIso(text) {
   return new Date(Date.now() - n * mult).toISOString();
 }
 
+// 终端显示宽度（CJK 等全角字符计 2 列）与对齐/截断工具
+const dispWidth = (s) => [...String(s)].reduce((w, ch) => w + (ch.codePointAt(0) > 0xff ? 2 : 1), 0);
+const padCell = (s, n) => {
+  s = String(s ?? "");
+  const w = dispWidth(s);
+  return w <= n ? s + " ".repeat(n - w) : [...s].reduce((acc, ch) => (dispWidth(acc + ch) <= n - 1 ? acc + ch : acc), "") + "…";
+};
+
 function extractAppId(input) {
   // 支持: idXXXX / decrypt.day app 链接 / apps.apple.com 链接
   const m =
@@ -408,6 +416,29 @@ async function cmdStatus(args) {
         requestedAt: relToIso(requestedAtText),
         raw: itemText.replace(/\n+/g, " | ").slice(0, 200),
       });
+    }
+    if (!JSON_OUT) {
+      // 人眼友好的表格输出
+      const W = { state: 12, app: 40, ver: 11, time: 22, id: 16 };
+      const line = "-".repeat(W.state + W.app + W.ver + W.time + W.id + 8);
+      console.log(`\n共 ${requests.length} 条请求\n`);
+      console.log(
+        [padCell("状态", W.state), padCell("App", W.app), padCell("版本", W.ver), padCell("提交时间", W.time), padCell("appId", W.id)].join("  ")
+      );
+      console.log(line);
+      for (const r of requests) {
+        console.log(
+          [
+            padCell(r.state ?? "-", W.state),
+            padCell(r.appName ?? "-", W.app),
+            padCell(r.version ?? "-", W.ver),
+            padCell(r.requestedAtText ?? "-", W.time),
+            padCell(r.appId ?? "-", W.id),
+          ].join("  ")
+        );
+      }
+      console.log("\n提示: 加 --json 获取结构化输出（含近似绝对时间 requestedAt / 原始文本 raw）");
+      return;
     }
     out({ ok: true, count: requests.length, requests });
   });
