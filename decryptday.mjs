@@ -233,28 +233,82 @@ async function getAppStoreUrl(page, appId) {
 }
 
 // ---------- 命令: login ----------
+// 自动登录尝试: login 页点 "Login with Discord" → Discord 授权页点 "Authorize"。
+// 前提: .profile 里 Discord 会话仍有效（会直接显示授权页而非登录页）。
+// 任何一步失败都静默退回人工模式（被动等待用户操作）。
+async function tryAutoDiscordLogin(page, ctx) {
+  try {
+    await goto(page, `${BASE}/login`, { wait: 2000 });
+    const btn = page.getByRole("button", { name: /Login with Discord/i }).first();
+    if ((await btn.count()) === 0) return { ok: false, stage: "discord-btn-not-found" };
+    await btn.click();
+    log("已点击 Login with Discord，等待 Discord 授权页...");
+
+    // 等待 discord.com 页面出现（同页跳转或新窗口）
+    const deadline = Date.now() + 30_000;
+    let discordPage = null;
+    while (Date.now() < deadline) {
+      for (const p of ctx.pages()) {
+        try {
+          if (p.url().includes("discord.com")) { discordPage = p; break; }
+        } catch {}
+      }
+      if (discordPage) break;
+      await sleep(800);
+    }
+    if (!discordPage) return { ok: false, stage: "discord-page-not-found" };
+    await discordPage.waitForLoadState("domcontentloaded").catch(() => {});
+    await discordPage.waitForTimeout(2500);
+
+    // Discord 要求重新登录（会话过期）→ 无法自动，退回人工
+    if (/discord\.com\/(login|oauth\/login|\/login)/.test(discordPage.url()))
+      return { ok: false, stage: "discord-session-expired", manual: true };
+
+    const authBtn = discordPage.getByRole("button", { name: /^Authorize$/i }).first();
+    if ((await authBtn.count()) === 0) {
+      // 可能是密码确认页/验证页 → 人工
+      return { ok: false, stage: "authorize-btn-not-found", url: discordPage.url().slice(0, 80), manual: true };
+    }
+    await authBtn.click();
+    log("已点击 Authorize，等待跳回 decrypt.day...");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, stage: "error", error: String(e).slice(0, 100) };
+  }
+}
+
 async function cmdLogin() {
-  console.error("已打开登录页，请在弹出的浏览器窗口中完成登录（Discord/Telegram/账号密码均可）。");
-  console.error("登录期间本工具不会动你的浏览器，检测到登录成功后自动结束并保存会话。");
+  console.error("已打开浏览器。将自动尝试 Discord 授权登录（Login with Discord → Authorize）；");
+  console.error("若 Discord 会话已过期需要输密码，请在窗口中手动完成，工具会自动检测成功。");
   await withBrowser({}, async (page, ctx) => {
-    // 先打开 /home：已有会话则直接检测成功；未登录再转到登录页，之后完全被动观察
+    // 先打开 /home：已有 decrypt.day 会话则直接检测成功
     await goto(page, `${BASE}/home`, { wait: 2000 }).catch(() => {});
-    let guided = false;
+    let attempted = false;
     const deadline = Date.now() + 10 * 60_000;
     let lastLogged = "";
     while (Date.now() < deadline) {
       await sleep(2000);
       const st = await checkAuthPassive(ctx);
       if (st && st.loggedIn) {
-        out({ ok: true, loggedIn: true, isPremier: st.isPremier, profile: PROFILE_DIR });
+        // 回调刚落地时页面数据可能未 hydrate 完（isPremier 瞬时为 false），主动刷新复核一次
+        let isPremier = st.isPremier;
+        try {
+          await goto(page, `${BASE}/home`, { wait: 2500 });
+          const re = await checkAuth(page);
+          if (re.loggedIn) isPremier = re.isPremier;
+        } catch {}
+        out({ ok: true, loggedIn: true, isPremier, profile: PROFILE_DIR, auto: attempted ? "discord" : "existing-session" });
         return;
       }
-      // 首次确认未登录且用户尚未自行离开 home 时，带去登录页（仅此一次）
-      if (!guided && page.url() === `${BASE}/home`) {
-        await goto(page, `${BASE}/login`, { wait: 1500 }).catch(() => {});
-        guided = true;
+      // 首次确认未登录时，自动尝试 Discord 授权（一次）
+      if (!attempted && !st) {
+        attempted = true;
+        const r = await tryAutoDiscordLogin(page, ctx);
+        log("自动登录尝试: " + JSON.stringify(r));
+        if (r.manual) log("Discord 需要人工操作（会话过期/验证），请在窗口中手动完成登录");
+        continue;
       }
-      const state = st ? (st.onLogin ? "登录页，等待你完成登录" : "在站内，未登录") : "站外（Discord OAuth 等）";
+      const state = st ? (st.onLogin ? "登录页" : "在站内，未登录") : "站外（Discord OAuth 等）";
       if (state !== lastLogged) {
         log("等待登录中... 当前状态: " + state);
         lastLogged = state;
