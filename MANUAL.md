@@ -67,13 +67,16 @@ IPA 保存位置：`--out` 指定的目录；不传则为**运行命令时所在
 
 ## 4. 命令详解
 
-### 4.1 `decryptday login` — 首次登录 / 会话续期
+### 4.1 `decryptday login` — 登录 / 会话续期
 
 ```bash
 decryptday login
 ```
 
-- 打开 /home，未登录则转到登录页；之后**完全被动观察**，绝不干扰你的操作（Discord OAuth 跳转、弹窗都能正确跟踪）
+- 已有会话 → 直接检测成功（`auto: "existing-session"`）
+- 会话过期 → **自动走 Discord 授权**：点 "Login with Discord" → Discord 授权页点 "Authorize" → 回调（`auto: "discord"`，全程零点击）
+- 自动化前提：profile 里 **Discord 会话仍有效**；若 Discord 也要求重新登录（输密码/验证），自动退回人工模式（窗口留给你操作，工具被动等待检测）
+- 登录期间除自动尝试的两次点击外**绝不导航**，不干扰手动操作
 - 检测到任意 decrypt.day 页面呈已登录状态即成功，会话写入 `.profile/`
 - 等待上限 10 分钟，超时输出 `LOGIN_TIMEOUT`
 - **重新登录成本很低**：profile 里保留着 Discord 登录态，通常只需点一次授权
